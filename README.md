@@ -31,17 +31,13 @@ Zen Browser backup solution is a comprehensive tool designed to safeguard your b
 
 ## Quick Start
 
-### 1. Configure Your Repository
-```bash
-./zen-sync-no-gpg.sh setup
-```
 
-### 2. Backup Your Profile
+### 1. Backup Your Profile
 ```bash
 ./zen-sync-no-gpg.sh backup
 ```
 
-### 3. Restore Your Profile
+### 2. Restore Your Profile
 ```bash
 ./zen-sync-no-gpg.sh restore
 ```
@@ -113,7 +109,7 @@ The script uses a JSON configuration file (`config.json`) to store:
 1. **Create GitHub repository** (if not exists):
    - Go to [GitHub](https://github.com/new)
    - Create private repository named `zen-sync`
-   - Use SSH: `git@github.com:Aabirr/zen-sync.git`
+   - Use SSH: `git@github.com:<username>/zen-sync.git`
 
 2. **Run backup** (no sudo needed):
    ```bash
@@ -167,9 +163,6 @@ chmod 755 ~/zen-sync
 # Restore from backup
 ./zen-sync-no-gpg.sh restore
 
-# Check last backup/restore
-./zen-sync-no-gpg.sh backup  # Shows last backup time
-./zen-sync-no-gpg.sh restore  # Shows last restore time
 ```
 
 ## Windows PowerShell Usage
@@ -177,9 +170,6 @@ For Windows users, use the PowerShell script provided:
 
 ### Basic Usage
 ```powershell
-# Run setup
-.\zen-sync-no-gpg.ps1 setup
-
 # Backup your profile
 .\zen-sync-no-gpg.ps1 backup
 
