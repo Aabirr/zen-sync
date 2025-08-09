@@ -1,0 +1,14 @@
+# Local backup artifacts
+zen-browser-profile-backup/
+*.tar.gz
+*.tar.gz.gpg
+*.gpg
+.file_hashes
+
+# Secrets
+.zen_sync_pass
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
