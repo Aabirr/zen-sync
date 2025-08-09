@@ -99,38 +99,46 @@ function Get-ZenProfilePath {
     } while ($true)
 }
 
-# Function to perform backup with browser detection
+# Function to perform backup with automatic browser handling
 function Invoke-Backup {
     Write-Status "Checking browser status..."
     
     # Check if Zen Browser is running
     $zenProcesses = Get-Process -Name "*zen*" -ErrorAction SilentlyContinue
     if ($zenProcesses) {
-        Write-Warning "Zen Browser is currently running. Files may be locked."
-        Write-Host "Options:"
-        Write-Host "  1. Close Zen Browser and retry"
-        Write-Host "  2. Continue anyway (may skip locked files)"
-        Write-Host "  3. Skip this backup attempt"
+        Write-Status "Zen Browser is running - attempting backup anyway..."
         
-        $choice = Read-Host "Enter choice (1-3)"
-        switch ($choice) {
-            1 {
-                Write-Status "Please close Zen Browser and run backup again"
-                return
-            }
-            2 {
-                Write-Warning "Continuing with backup - locked files may be skipped"
-            }
-            3 {
-                Write-Status "Skipping backup attempt"
-                return
-            }
+        # Check file accessibility
+        $lockedFiles = Test-FileAccess -ProfilePath $script:zenProfile
+        if ($lockedFiles.Count -gt 0) {
+            Write-Status "Files locked: $($lockedFiles -join ', ')"
+            Write-Status "Will retry in 5 minutes..."
+            return $false
         }
     }
     
     Write-Status "Performing automatic backup..."
     $mainScript = Get-MainScriptPath
-    & $mainScript backup
+    try {
+        & $mainScript backup
+        return $true
+    } catch {
+        Write-Status "Backup failed: $_"
+        return $false
+    }
+}
+
+# Function to perform restore with automatic handling
+function Invoke-Restore {
+    Write-Status "Performing automatic restore..."
+    $mainScript = Get-MainScriptPath
+    try {
+        & $mainScript restore
+        return $true
+    } catch {
+        Write-Status "Restore failed: $_"
+        return $false
+    }
 }
 
 # Function to check if files are accessible
@@ -172,82 +180,123 @@ function Start-WatchMode {
     Write-Status "Starting watch mode for: $ProfilePath"
     
     # Files to watch
-    $filesToWatch = @(
-        Join-Path $ProfilePath "places.sqlite"
-        Join-Path $ProfilePath "sessionstore.jsonlz4"
-        Join-Path $ProfilePath "sessionstore-backups"
-    )
-    
     # Check file access before watching
     $lockedFiles = Test-FileAccess -ProfilePath $ProfilePath
     if ($lockedFiles.Count -gt 0) {
-        Write-Warning "Files are currently locked: $($lockedFiles -join ', ')"
-        Write-Warning "Consider closing Zen Browser for complete backup"
+        Write-Status "Files locked: $($lockedFiles -join ', ')"
+        Write-Status "Will use polling mode instead"
     }
     
-    # Check if FileSystemWatcher is available
-    try {
-        $watcher = New-Object System.IO.FileSystemWatcher
-        $watcher.Path = $ProfilePath
-        $watcher.IncludeSubdirectories = $true
-        $watcher.EnableRaisingEvents = $true
-        
-        # Register events
-        Register-ObjectEvent -InputObject $watcher -EventName "Changed" -Action {
-            Write-Status "Change detected, backing up..."
-            Invoke-Backup
-            Start-Sleep -Seconds 30  # Prevent rapid successive backups
-        }
-        
-        Register-ObjectEvent -InputObject $watcher -EventName "Created" -Action {
-            Write-Status "File created, backing up..."
-            Invoke-Backup
-            Start-Sleep -Seconds 30
-        }
-        
-        Register-ObjectEvent -InputObject $watcher -EventName "Deleted" -Action {
-            Write-Status "File deleted, backing up..."
-            Invoke-Backup
-            Start-Sleep -Seconds 30
-        }
-        
-        Write-Status "Watching for changes. Press Ctrl+C to stop..."
-        
-        # Keep running
-        while ($true) {
-            Start-Sleep -Seconds 1
-        }
-    } catch {
-        Write-Warning "FileSystemWatcher not available, using polling mode..."
-        Start-PollingMode -ProfilePath $ProfilePath
-    }
+    # Use polling mode for reliability
+    Start-PollingMode -ProfilePath $ProfilePath
 }
 
-# Function to poll for changes (fallback)
+# Function to poll for changes with remote sync
 function Start-PollingMode {
     param([string]$ProfilePath)
     
     Write-Status "Starting polling mode for: $ProfilePath"
-    $lastHash = $null
+    $lastLocalHash = $null
+    $lastRemoteHash = $null
+    $retryCount = 0
+    $maxRetries = 3
+    
+    # Function to check remote changes
+    function Test-RemoteChanges {
+        try {
+            # Check if repo exists
+            if (-not (Test-Path ".git")) {
+                return $false
+            }
+            
+            # Fetch latest changes
+            git fetch origin 2>&1 | Out-Null
+            
+            # Check if local is behind remote
+            $localCommit = git rev-parse HEAD 2>&1
+            $remoteCommit = git rev-parse origin/main 2>&1
+            
+            if ($localCommit -ne $remoteCommit) {
+                Write-Status "Remote changes detected"
+                return $true
+            }
+            return $false
+        } catch {
+            Write-Status "Error checking remote changes: $_"
+            return $false
+        }
+    }
+    
+    # Function to create hash of local files
+    function Get-LocalFileHash {
+        $files = @(
+            Join-Path $ProfilePath "places.sqlite"
+            Join-Path $ProfilePath "sessionstore.jsonlz4"
+            Join-Path $ProfilePath "sessionstore-backups\sessionstore.jsonlz4"
+        )
+        
+        $hashString = ""
+        foreach ($file in $files) {
+            if (Test-Path $file) {
+                try {
+                    $hash = Get-FileHash $file -Algorithm MD5 -ErrorAction SilentlyContinue
+                    $hashString += $hash.Hash
+                } catch {
+                    $hashString += "locked"
+                }
+            } else {
+                $hashString += "missing"
+            }
+        }
+        return $hashString
+    }
     
     while ($true) {
         try {
-            $currentHash = Get-ChildItem -Path $ProfilePath -Recurse -File | 
-                Where-Object { $_.Name -match "places.sqlite|sessionstore.jsonlz4" -or $_.DirectoryName -like "*sessionstore-backups*" } |
-                ForEach-Object { Get-FileHash $_.FullName -Algorithm MD5 } |
-                Select-Object -ExpandProperty Hash
+            # Check for remote changes first
+            if (Test-RemoteChanges) {
+                Write-Status "Remote changes detected, pulling..."
+                $success = Invoke-Restore
+                if ($success) {
+                    Write-Status "Remote sync completed"
+                    $lastRemoteHash = Get-LocalFileHash
+                    $lastLocalHash = $lastRemoteHash
+                }
+            }
             
-            if ($currentHash -ne $lastHash) {
-                Write-Status "Change detected, backing up..."
-                Invoke-Backup
-                $lastHash = $currentHash
+            # Check for local changes
+            $currentHash = Get-LocalFileHash
+            if ($currentHash -ne $lastLocalHash) {
+                Write-Status "Local changes detected, attempting backup..."
+                $success = Invoke-Backup
+                if ($success) {
+                    $lastLocalHash = $currentHash
+                    $retryCount = 0
+                    Write-Status "Backup completed successfully"
+                } else {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Status "Backup failed, retrying in 5 minutes... ($retryCount/$maxRetries)"
+                        Start-Sleep -Seconds 300
+                    } else {
+                        Write-Status "Max retries reached, waiting 30 minutes..."
+                        Start-Sleep -Seconds 1800
+                        $retryCount = 0
+                    }
+                }
             }
         } catch {
-            Write-Error "Error during polling: $_"
+            Write-Status "Error during polling: $_"
         }
         
         Start-Sleep -Seconds 60
     }
+}
+
+# Function to pull changes from Git
+function Invoke-PullChanges {
+    Write-Status "Pulling changes from GitHub..."
+    Invoke-Restore
 }
 
 # Function to schedule periodic sync
@@ -267,12 +316,6 @@ function Start-ScheduleMode {
 function Invoke-PushChanges {
     Write-Status "Pushing changes to GitHub..."
     Invoke-Backup
-}
-
-# Function to pull changes from Git
-function Invoke-PullChanges {
-    Write-Status "Pulling changes from GitHub..."
-    Invoke-Restore
 }
 
 # Main function
