@@ -3,8 +3,8 @@ set -euo pipefail
 
 # === CONFIG ===
 CONFIG_FILE="$HOME/.zen_sync_config.json"
-FILES=("places.sqlite" "places.sqlite-shm" "places.sqlite-wal" "sessionstore.jsonlz4")
-SESSION_DIR="sessionbackups"
+FILES=("places.sqlite" "places.sqlite-wal" "sessionstore.jsonlz4")
+SESSION_DIR="sessionstore-backups"
 SESSIONSTORE_BACKUPS_DIR="sessionstore-backups"
 
 # === CONFIGURATION MANAGEMENT ===
@@ -68,34 +68,52 @@ get_zen_profile_paths() {
     
     # Check for regular Zen Browser profiles
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # Linux - check flatpak path
-        zen_base="$HOME/.var/app/app.zen_browser.zen/.zen"
-        ini_path="$zen_base/profiles.ini"
+        # Linux - check standard and flatpak paths
+        zen_bases=("$HOME/.zen" "$HOME/.var/app/app.zen_browser.zen/.zen")
         
-        if [[ -f "$ini_path" ]]; then
-            profile_path=$(grep "^Path=" "$ini_path" | head -1 | cut -d'=' -f2)
-            is_relative=$(grep "^IsRelative=" "$ini_path" | head -1 | cut -d'=' -f2)
+        for zen_base in "${zen_bases[@]}"; do
+            ini_path="$zen_base/profiles.ini"
             
-            if [[ "$is_relative" == "1" ]]; then
-                profiles+=("Regular:$zen_base/$profile_path")
-            else
-                profiles+=("Regular:$profile_path")
+            if [[ -f "$ini_path" ]]; then
+                # Parse profiles.ini correctly using process substitution to avoid subshell issues
+                while IFS= read -r profile; do
+                    [[ -n "$profile" ]] && profiles+=("$profile")
+                done < <(awk '
+                    /^Name=/ { name=$0; sub(/^Name=/, "", name); current_name=name }
+                    /^Path=/ { path=$0; sub(/^Path=/, "", path); current_path=path }
+                    current_name && current_path {
+                        print current_name":"zen_base"/"current_path
+                        current_name=""
+                        current_path=""
+                    }
+                ' zen_base="$zen_base" "$ini_path")
+                break
             fi
-        fi
+        done
     elif [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS
         zen_base="$HOME/Library/Application Support/Zen"
         ini_path="$zen_base/profiles.ini"
         
         if [[ -f "$ini_path" ]]; then
-            profile_path=$(grep "^Path=" "$ini_path" | head -1 | cut -d'=' -f2)
-            is_relative=$(grep "^IsRelative=" "$ini_path" | head -1 | cut -d'=' -f2)
-            
-            if [[ "$is_relative" == "1" ]]; then
-                profiles+=("Regular:$zen_base/$profile_path")
-            else
-                profiles+=("Regular:$profile_path")
-            fi
+            # Parse profiles.ini correctly using process substitution
+            while IFS= read -r profile; do
+                [[ -n "$profile" ]] && profiles+=("$profile")
+            done < <(awk '
+                /^Name=/ { name=$0; sub(/^Name=/, "", name); current_name=name }
+                /^Path=/ { path=$0; sub(/^Path=/, "", path); current_path=path }
+                /^IsRelative=/ { is_relative=$0; sub(/^IsRelative=/, "", is_relative) }
+                current_name && current_path {
+                    if (is_relative == "1") {
+                        print "Regular:"zen_base"/"current_path
+                    } else {
+                        print "Regular:"current_path
+                    }
+                    current_name=""
+                    current_path=""
+                    is_relative=""
+                }
+            ' zen_base="$zen_base" "$ini_path")
         fi
     fi
     
@@ -123,47 +141,49 @@ get_zen_profile_paths() {
         fi
     fi
     
+    printf '%s\n' "${profiles[@]}"
+}
+
+select_profile() {
+    # Get profiles and store in array
+    profiles=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && profiles+=("$line")
+    done < <(get_zen_profile_paths)
+    
     if [[ ${#profiles[@]} -eq 0 ]]; then
         echo "Error: No Zen Browser profiles found. Make sure Zen Browser is installed and has been run at least once."
         exit 1
     fi
     
-    printf '%s\n' "${profiles[@]}"
-}
-
-select_profile() {
-    local profiles=()
-    local profile_names=()
-    local profile_paths=()
-    
-    # Read profiles into arrays
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            profiles+=("$line")
-            profile_names+=("$(echo "$line" | cut -d':' -f1)")
-            profile_paths+=("$(echo "$line" | cut -d':' -f2)")
-        fi
-    done < <(get_zen_profile_paths)
-    
     if [[ ${#profiles[@]} -eq 1 ]]; then
-        echo "Found 1 profile: ${profile_names[0]}"
-        echo "${profile_paths[0]}"
+        profile_path=$(echo "${profiles[0]}" | cut -d':' -f2)
+        echo "Using single profile: ${profiles[0]}" >&2
+        echo "$profile_path"
         return
     fi
     
-    echo "Found ${#profiles[@]} Zen Browser profiles:"
-    for i in "${!profile_names[@]}"; do
-        echo "  [$((i+1))] ${profile_names[i]}"
-        echo "      ${profile_paths[i]}"
+    echo "Found ${#profiles[@]} Zen Browser profiles:" >&2
+    echo "" >&2
+    
+    # Display profiles
+    for i in "${!profiles[@]}"; do
+        profile_name=$(echo "${profiles[i]}" | cut -d':' -f1)
+        profile_path=$(echo "${profiles[i]}" | cut -d':' -f2)
+        echo "  [$((i+1))] $profile_name" >&2
+        echo "      $profile_path" >&2
     done
     
+    echo "" >&2
     while true; do
-        read -p "Select profile (1-${#profiles[@]}): " selection
+        echo -n "Select profile (1-${#profiles[@]}): " >&2
+        read selection
         if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -ge 1 ]] && [[ "$selection" -le ${#profiles[@]} ]]; then
-            echo "${profile_paths[$((selection-1))]}"
+            profile_path=$(echo "${profiles[$((selection-1))]}" | cut -d':' -f2)
+            echo "$profile_path"
             return
         fi
-        echo "Invalid selection. Please enter a number between 1 and ${#profiles[@]}."
+        echo "Invalid selection. Please enter a number between 1 and ${#profiles[@]}." >&2
     done
 }
 
@@ -293,9 +313,9 @@ invoke_restore() {
     
     repo_url=$(echo "$config" | jq -r '.repositoryUrl')
     repo_dir=$(echo "$config" | jq -r '.repositoryDir')
-    full_path=$(get_zen_profile_path)
+    full_path=$(select_profile)
     
-    echo "Zen Profile: $full_path"
+    echo "Selected Zen Profile: $full_path"
     
     # Clean up any existing repo directory
     if [[ -d "$repo_dir" ]]; then
