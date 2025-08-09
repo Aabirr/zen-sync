@@ -21,25 +21,111 @@ Zen Browser backup solution is a comprehensive tool designed to safeguard your b
 - **Manual Backup**: Perform manual backups at any time for added flexibility.
 
 ## Requirements
-- Zen Browser installed on your system
-- Python 3.x installed on your system
+- **Zen Browser** installed on your system
+- **Git** installed: `sudo apt install git` (Ubuntu/Debian) or `brew install git` (macOS)
+- **tar** installed: Usually pre-installed on Linux/macOS
+- **jq** installed: `sudo apt install jq` (Ubuntu/Debian) or `brew install jq` (macOS)
 
 ## Installation
-1. Clone the repository: `git clone https://github.com/your-repo/zen-sync.git`
-2. Install the required dependencies: `pip install -r requirements.txt`
-3. Configure the script according to your needs
+1. **Install dependencies** (without sudo):
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update && sudo apt install git jq tar
 
-## Usage
-1. Run the script: `python zen-sync.py`
-2. Follow the prompts to select the backup options
+   # Arch Linux
+   sudo pacman -S git jq tar
 
-## Configuration
-- **Backup Directory**: Specify the directory where you want to store your backups
-- **Backup Frequency**: Set the frequency for automatic backups
+   # Fedora
+   sudo dnf install git jq tar
+   ```
 
-## Backup and Restore
-- **Backup**: Run the script to create a backup of your Zen Browser data
-- **Restore**: Use the restore option to recover your data from a previous backup
+2. **Clone the repository**:
+   ```bash
+   git clone git@github.com:Aabirr/zen-sync.git
+   cd zen-sync
+   ```
+
+3. **Make scripts executable**:
+   ```bash
+   chmod +x zen-sync-no-gpg.sh
+   ```
+
+## Usage on Linux
+
+### First Time Setup
+1. **Create GitHub repository** (if not exists):
+   - Go to [GitHub](https://github.com/new)
+   - Create private repository named `zen-sync`
+   - Use SSH: `git@github.com:Aabirr/zen-sync.git`
+
+2. **Run backup** (no sudo needed):
+   ```bash
+   ./zen-sync-no-gpg.sh backup
+   ```
+
+### Important Notes:
+- **Never use sudo** with the backup script - it runs as your user
+- **Install dependencies first** with sudo, then run script normally
+- **Run from your home directory** or wherever you cloned the repo
+
+### Fix Permission Denied:
+```bash
+# 1. Make sure you're in the correct directory
+cd ~/zen-sync  # or wherever you cloned it
+
+# 2. Fix file permissions
+chmod +x zen-sync-no-gpg.sh
+chmod +x zen-sync.sh
+
+# 3. Verify permissions
+ls -la zen-sync-no-gpg.sh
+# Should show: -rwxr-xr-x
+
+# 4. Run the script
+./zen-sync-no-gpg.sh backup
+
+# If still permission denied, check directory permissions:
+ls -ld ~/zen-sync
+# Should show: drwxr-xr-x
+
+# If directory is wrong, fix it:
+chmod 755 ~/zen-sync
+```
+
+3. **Select profile** when prompted:
+   ```
+   Found 2 Zen Browser profiles:
+     [1] Regular
+         /home/user/.var/app/app.zen_browser.zen/.zen/xxxxxxxx.default-release
+     [2] Twilight (Default)
+         /home/user/.zen/profiles/abc123.Default
+   Select profile (1-2): 1
+   ```
+
+### Regular Usage
+```bash
+# Backup current profile
+./zen-sync-no-gpg.sh backup
+
+# Restore from backup
+./zen-sync-no-gpg.sh restore
+
+# Check last backup/restore
+./zen-sync-no-gpg.sh backup  # Shows last backup time
+./zen-sync-no-gpg.sh restore  # Shows last restore time
+```
+
+## Linux-Specific Paths
+- **Regular Zen**: `~/.var/app/app.zen_browser.zen/.zen/`
+- **Twilight Zen**: `~/.zen/profiles/`
+- **Configuration**: `~/.zen_sync_config.json`
+
+## Troubleshooting on Linux
+- **"Permission denied"**: Run `chmod +x zen-sync-no-gpg.sh`
+- **"jq not found"**: Install with `sudo apt install jq`
+- **"Git not found"**: Install with `sudo apt install git`
+- **"tar not found"**: Install with `sudo apt install tar`
+- **"No profiles found"**: Ensure Zen Browser has been run at least once
 
 ## Troubleshooting
 - **Common Issues**: Check the troubleshooting section for solutions to common problems
