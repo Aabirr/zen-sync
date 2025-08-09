@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # === CONFIG ===
-REPO_DIR="$HOME/zen-browser-profile-backup"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # Use script's directory
 FILES=("places.sqlite" "places.sqlite-shm" "places.sqlite-wal" "sessionstore.jsonlz4")
 FOLDERS=("sessionstore-backups")
 SESSION_DIR="sessionbackups"
@@ -71,8 +71,8 @@ backup() {
             OLD_HASH=$(grep "$FILE" "$HASH_FILE" | awk '{print $2}')
             if [[ "$NEW_HASH" != "$OLD_HASH" ]]; then
                 echo "Encrypting $FILE..."
-                gpg --batch --yes --passphrase-file "$PASS_FILE" -c "$SRC"
-                mv "$FILE.gpg" "$ENC"
+                cd "$REPO_DIR"
+                gpg --batch --yes --passphrase-file "$PASS_FILE" -o "$ENC" -c "$SRC"
                 sed -i.bak "/$FILE/d" "$HASH_FILE" && rm -f "$HASH_FILE.bak"
                 echo "$FILE $NEW_HASH" >> "$HASH_FILE"
                 CHANGED=true
@@ -121,6 +121,14 @@ restore() {
         DEST="$FULL_PATH/$FILE"
         if [[ -f "$ENC" ]]; then
             echo "Decrypting $FILE..."
+            
+            # Backup existing file if it exists
+            if [[ -f "$DEST" ]]; then
+                BAK_FILE="$DEST.bak"
+                echo "Backing up existing $FILE to $(basename "$BAK_FILE")"
+                mv "$DEST" "$BAK_FILE"
+            fi
+            
             gpg --batch --yes --passphrase-file "$PASS_FILE" -o "$DEST" -d "$ENC"
         else
             echo "Missing: $ENC"
@@ -130,6 +138,16 @@ restore() {
     ARCHIVE="$REPO_DIR/$SESSION_ARCHIVE"
     if [[ -f "$ARCHIVE" ]]; then
         echo "Decrypting sessionbackups archive..."
+        SESSION_DEST="$FULL_PATH/$SESSION_DIR"
+        
+        # Backup existing sessionbackups folder
+        if [[ -d "$SESSION_DEST" ]]; then
+            BAK_DIR="$SESSION_DEST.bak"
+            echo "Backing up existing sessionbackups to $(basename "$BAK_DIR")"
+            [[ -d "$BAK_DIR" ]] && rm -rf "$BAK_DIR"
+            mv "$SESSION_DEST" "$BAK_DIR"
+        fi
+        
         gpg --batch --yes --passphrase-file "$PASS_FILE" -o "$REPO_DIR/sessionbackups.tar.gz" -d "$ARCHIVE"
         tar -xzf "$REPO_DIR/sessionbackups.tar.gz" -C "$FULL_PATH"
         rm "$REPO_DIR/sessionbackups.tar.gz"
@@ -140,6 +158,16 @@ restore() {
     SESSIONSTORE_ARCHIVE="$REPO_DIR/$SESSIONSTORE_BACKUPS_ARCHIVE"
     if [[ -f "$SESSIONSTORE_ARCHIVE" ]]; then
         echo "Decrypting sessionstore-backups archive..."
+        SESSIONSTORE_DEST="$FULL_PATH/$SESSIONSTORE_BACKUPS_DIR"
+        
+        # Backup existing sessionstore-backups folder
+        if [[ -d "$SESSIONSTORE_DEST" ]]; then
+            BAK_DIR2="$SESSIONSTORE_DEST.bak"
+            echo "Backing up existing sessionstore-backups to $(basename "$BAK_DIR2")"
+            [[ -d "$BAK_DIR2" ]] && rm -rf "$BAK_DIR2"
+            mv "$SESSIONSTORE_DEST" "$BAK_DIR2"
+        fi
+        
         gpg --batch --yes --passphrase-file "$PASS_FILE" -o "$REPO_DIR/sessionstore-backups.tar.gz" -d "$SESSIONSTORE_ARCHIVE"
         tar -xzf "$REPO_DIR/sessionstore-backups.tar.gz" -C "$FULL_PATH"
         rm "$REPO_DIR/sessionstore-backups.tar.gz"

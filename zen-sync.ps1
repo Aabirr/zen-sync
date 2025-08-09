@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 
 # === CONFIG ===
 $HomeDir   = [Environment]::GetFolderPath('UserProfile')
-$RepoDir   = Join-Path $HomeDir 'zen-browser-profile-backup'
+$RepoDir   = Split-Path -Parent $MyInvocation.MyCommand.Path  # Use script's directory
 $Files     = @('places.sqlite','places.sqlite-shm','places.sqlite-wal','sessionstore.jsonlz4')
 $SessionDir = 'sessionbackups'
 $SessionArchive = "$SessionDir.tar.gz.gpg"
@@ -175,6 +175,14 @@ function Invoke-Restore {
         if (Test-Path $enc) {
             Write-Host "Decrypting $f..."
             Ensure-Directory (Split-Path $dest -Parent)
+            
+            # Backup existing file if it exists
+            if (Test-Path $dest) {
+                $bakFile = "$dest.bak"
+                Write-Host "Backing up existing $f to $([System.IO.Path]::GetFileName($bakFile))"
+                Move-Item -Path $dest -Destination $bakFile -Force
+            }
+            
             Invoke-GpgDecrypt -src $enc -dst $dest
         } else { Write-Host "Missing: $enc" }
     }
@@ -183,6 +191,16 @@ function Invoke-Restore {
     if (Test-Path $arch) {
         Write-Host 'Decrypting sessionbackups archive...'
         $tmp = Join-Path $RepoDir 'sessionbackups.tar.gz'
+        $sessionDest = Join-Path $fullPath $SessionDir
+        
+        # Backup existing sessionbackups folder
+        if (Test-Path $sessionDest) {
+            $bakDir = "$sessionDest.bak"
+            Write-Host "Backing up existing sessionbackups to $([System.IO.Path]::GetFileName($bakDir))"
+            if (Test-Path $bakDir) { Remove-Item -Recurse -Force $bakDir }
+            Move-Item -Path $sessionDest -Destination $bakDir
+        }
+        
         Invoke-GpgDecrypt -src $arch -dst $tmp
         Invoke-TarExtractGz -tarGz $tmp -destDir $fullPath
         Remove-Item -Force $tmp
@@ -192,22 +210,35 @@ function Invoke-Restore {
     if (Test-Path $arch2) {
         Write-Host 'Decrypting sessionstore-backups archive...'
         $tmp2 = Join-Path $RepoDir 'sessionstore-backups.tar.gz'
+        $sessionStoreDest = Join-Path $fullPath $SessionStoreBackupsDir
+        
+        # Backup existing sessionstore-backups folder
+        if (Test-Path $sessionStoreDest) {
+            $bakDir2 = "$sessionStoreDest.bak"
+            Write-Host "Backing up existing sessionstore-backups to $([System.IO.Path]::GetFileName($bakDir2))"
+            if (Test-Path $bakDir2) { Remove-Item -Recurse -Force $bakDir2 }
+            Move-Item -Path $sessionStoreDest -Destination $bakDir2
+        }
+        
         Invoke-GpgDecrypt -src $arch2 -dst $tmp2
         Invoke-TarExtractGz -tarGz $tmp2 -destDir $fullPath
         Remove-Item -Force $tmp2
     } else { Write-Host "Missing: $arch2" }
 
-    Write-Host "`u2705 Restore complete."
+    Write-Host "Restore complete."
 }
 
 # === MAIN ===
-param(
-    [Parameter(Position=0,Mandatory=$true)]
-    [ValidateSet('backup','restore')]
-    [string]$Command
-)
+if ($args.Count -eq 0) {
+    Write-Host "Usage: zen-sync.ps1 {backup|restore}"
+    exit 1
+}
 
-switch ($Command) {
+switch ($args[0]) {
     'backup'  { Invoke-Backup }
     'restore' { Invoke-Restore }
+    default {
+        Write-Host "Usage: zen-sync.ps1 {backup|restore}"
+        exit 1
+    }
 }

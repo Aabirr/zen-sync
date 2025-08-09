@@ -1,12 +1,8 @@
-# Local backup artifacts
-zen-browser-profile-backup/
-*.tar.gz
-*.tar.gz.gpg
-*.gpg
-.file_hashes
-
-# Secrets
+# Secrets (never commit these)
 .zen_sync_pass
+
+# Temporary files during backup/restore
+*.tar.gz
 
 # OS / editor
 .DS_Store
